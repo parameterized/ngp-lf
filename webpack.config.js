@@ -5,10 +5,13 @@ module.exports = function (env, argv) {
     let prod = env && env.production;
     return {
         mode: prod ? 'production' : 'development',
-        entry: `./src/index.js`,
+        entry: {
+            main: './src/index.js',
+            regltest: './src/regltest/index.js'
+        },
         output: {
             path: path.join(__dirname, 'public'),
-            filename: `bundle.js`
+            filename: `[name]-bundle.js`
         },
         module: {
             rules: [
@@ -16,6 +19,14 @@ module.exports = function (env, argv) {
                     test: /\.js$/,
                     exclude: /node_modules/,
                     loader: 'babel-loader'
+                },
+                {
+                    test: /\.(glsl|vs|fs|vert|frag)$/,
+                    exclude: /node_modules/,
+                    use: [
+                        'raw-loader',
+                        'glslify-loader'
+                    ]
                 }
             ]
         },
@@ -25,7 +36,12 @@ module.exports = function (env, argv) {
                 directory: path.join(__dirname, 'public')
             },
             compress: true,
-            port: 8080
+            port: 8080,
+            historyApiFallback: {
+                rewrites: [
+                    { from: /^\/regltest/, to: 'regltest.html' }
+                ]
+            }
         }
     };
 };

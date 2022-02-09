@@ -1,7 +1,8 @@
 # ngp-lf
 [Neural graphics primitives](https://nvlabs.github.io/instant-ngp/) hash encoding applied to light fields, implemented in WebGL shaders
 
-Training is not implemented yet
+Training in WebGL / loading trained models not implemented yet,
+experimental notebooks are in /jupyter.
 
 ## Running
 

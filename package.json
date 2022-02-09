@@ -18,7 +18,11 @@
   },
   "homepage": "https://github.com/parameterized/ngp-lf#readme",
   "dependencies": {
-    "core-js": "^3.20.3"
+    "core-js": "^3.20.3",
+    "glslify": "^7.1.1",
+    "glslify-loader": "^2.0.0",
+    "raw-loader": "^4.0.2",
+    "regl": "^2.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.16.12",
