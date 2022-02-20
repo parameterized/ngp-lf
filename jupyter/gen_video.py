@@ -8,7 +8,13 @@ import moviepy.editor as mpy
 
 from dataset import get_rays
 
-def gen_video(dataset, model, path, duration=2, fps=12, cuda=True):
+def gen_batched_img(model, rays, batch_size):
+    pred = torch.zeros_like(rays[:, :3])
+    for i in range(int(np.ceil(rays.shape[0] / batch_size))):
+        pred[i*batch_size : (i+1)*batch_size] = model(rays[i*batch_size : (i+1)*batch_size])
+    return pred
+
+def gen_video(dataset, model, path, duration=2, fps=12, cuda=True, batch_size=None):
     camxs = dataset.poses[:, 0, -1]
     camzs = dataset.poses[:, 2, -1]
     cam_left_id = np.argmin(camxs + camzs)
@@ -38,7 +44,10 @@ def gen_video(dataset, model, path, duration=2, fps=12, cuda=True):
             rays = get_rays(H, W, focal, pose_t)
             if cuda:
                 rays = rays.cuda()
-            pred = model(rays)
+            if batch_size is None:
+                pred = model(rays)
+            else:
+                pred = gen_batched_img(model, rays, batch_size)
             pred_r = transforms.Resize(256)(pred.clip(0, 1).reshape(H, W, 3).permute(2,0,1))
             img = pred_r.permute(1,2,0).multiply(255).int().cpu().numpy()
         return img
