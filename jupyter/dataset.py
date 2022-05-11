@@ -49,9 +49,10 @@ class Dataset:
         scene_path: path to scene
         scene_type: 'llff' or 'blender'
         resize: None or length for smaller edge (default is 256)
+        parition: 'train', 'val', or 'test' (for blender scenes, default is 'train')
     """
 
-    def __init__(self, scene_path, scene_type, resize=256):
+    def __init__(self, scene_path, scene_type, resize=256, partition='train'):
         if resize is None:
             transform = transforms.ToTensor()
         else:
@@ -69,7 +70,7 @@ class Dataset:
             self.H, self.W = self.images[0].shape[1:]
             self.focal = self.H / hwf[0] * hwf[2]
         elif scene_type == 'blender':
-            with open(os.path.join(scene_path, 'transforms_train.json'), 'r') as f:
+            with open(os.path.join(scene_path, f'transforms_{partition}.json'), 'r') as f:
                 transforms_json = json.load(f)
             self.images = []
             self.poses = []
@@ -99,12 +100,12 @@ class Dataset:
         print('Camera position mean & std:')
         print(self.poses[:,:,-1].mean(axis=0), self.poses[:,:,-1].std(axis=0))
 
-        self.rays = []
-        self.colors = []
+        rays = []
+        colors = []
 
         for i in range(len(self.poses)):
-            self.rays.append(get_rays(self.H, self.W, self.focal, self.poses[i]))
-            self.colors.append(self.images[i].permute(1,2,0).reshape(-1, 3))
+            rays.append(get_rays(self.H, self.W, self.focal, self.poses[i]))
+            colors.append(self.images[i].permute(1,2,0).reshape(-1, 3))
 
-        self.rays = torch.cat(self.rays, axis=0).cuda()
-        self.colors = torch.cat(self.colors, axis=0).cuda()
+        self.rays = torch.cat(rays, axis=0).cuda()
+        self.colors = torch.cat(colors, axis=0).cuda()
