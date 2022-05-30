@@ -3,8 +3,11 @@ import os
 import json
 import numpy as np
 import torch
+from torch.nn.functional import grid_sample
 from torchvision import transforms
 from PIL import Image
+
+BICUBIC = transforms.functional.InterpolationMode.BICUBIC
 
 
 # https://github.com/Fyusion/LLFF
@@ -51,14 +54,14 @@ class Dataset:
         resize: None or length for smaller edge (default is 256)
         parition: 'train', 'val', or 'test' (for blender scenes, default is 'train')
     """
-
     def __init__(self, scene_path, scene_type, resize=256, partition='train'):
         if resize is None:
             transform = transforms.ToTensor()
         else:
             transform = transforms.Compose([
-                transforms.Resize(resize),
-                transforms.ToTensor()
+                transforms.Resize(resize, interpolation=BICUBIC),
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.clip(0, 1))
             ])
 
         if scene_type == 'llff':
@@ -109,3 +112,88 @@ class Dataset:
 
         self.rays = torch.cat(rays, axis=0).cuda()
         self.colors = torch.cat(colors, axis=0).cuda()
+    
+    def idxy_from_ray_ids(self, ray_ids):
+        """Get a tensor of [image id, x, y] from a tensor of ray indices.
+        x and y are in the range [0, 1]
+        """
+        idxy = torch.zeros(ray_ids.shape[0], 3).cuda()
+        idxy[:, 0] = ray_ids // (self.H * self.W)
+        idxy[:, 1] = ray_ids / self.W % 1
+        idxy[:, 2] = ray_ids // self.W / self.H - idxy[:, 0]
+        return idxy
+
+
+class MultiscaleDataset(Dataset):
+    """Load scene data
+    
+    Args:
+        scene_path: path to scene
+        scene_type: 'llff' or 'blender'
+        resize: None or length for smaller edge (default is 256)
+        parition: 'train', 'val', or 'test' (for blender scenes, default is 'train')
+    """
+    def __init__(self, scene_path, scene_type, resize=256, partition='train'):
+        super().__init__(scene_path, scene_type, resize, partition)
+        self.scaled_images = [self.images]
+        size = min(self.H, self.W)
+        while size > 1:
+            size //= 2
+            rs_transform = transforms.Resize(size, interpolation=BICUBIC)
+            rs_imgs = rs_transform(self.scaled_images[-1]).clip(0, 1)
+            self.scaled_images.append(rs_imgs)
+        
+        self.images_full = torch.zeros(
+            3, self.H * self.images.shape[0], int(np.ceil(self.W * 3 / 2))).cuda()
+        self.images_full[:, :, :self.W] = torch.cat(
+            [*self.scaled_images[0]], dim=1)
+        
+        x = self.W
+        y_offset = 0
+        for i, imgs in enumerate(self.scaled_images[1:]):
+            h, w = imgs.shape[-2:]
+            for j, img in enumerate(imgs):
+                y = j * self.H + y_offset
+                self.images_full[:, y:y+h, x:x+w] = img
+            y_offset += h
+    
+    def sample(self, x):
+        """Sample images with a tensor containing
+        [image id, pixel size, x, y] on its last dimension
+
+        pixel size, x, and y are all in the range [0, 1]
+        """
+        c1 = x[..., 2:].clone()
+        c2 = c1.clone()
+        
+        z0 = torch.zeros(1).cuda()
+        base_size = torch.tensor([min(self.H, self.W)]).cuda()
+        imax = torch.log2(base_size).floor()
+        i = torch.log2(x[..., 1] * base_size)
+        i1 = i.floor().clip(z0, imax)
+        i2 = i.ceil().clip(z0, imax)
+        s1 = torch.pow(0.5, i1)
+        s2 = torch.pow(0.5, i2)
+        
+        x_off_1 = (i1 > 0.5).float()
+        x_off_2 = (i2 > 0.5).float()
+        y_off_1 = torch.maximum(1 - 2 * s1, z0) + x[..., 0]
+        y_off_2 = torch.maximum(1 - 2 * s2, z0) + x[..., 0]
+        
+        c1[..., -2] = (c1[..., -2] * s1 + x_off_1) * (4 / 3) - 1
+        c2[..., -2] = (c2[..., -2] * s2 + x_off_2) * (4 / 3) - 1
+        c1[..., -1] = (c1[..., -1] * s1 + y_off_1) * (2 / len(self.images)) - 1
+        c2[..., -1] = (c2[..., -1] * s2 + y_off_2) * (2 / len(self.images)) - 1
+        
+        rgb1 = grid_sample(self.images_full.unsqueeze(0), c1,
+            mode='bilinear', padding_mode='border')
+        rgb2 = grid_sample(self.images_full.unsqueeze(0), c2,
+            mode='bilinear', padding_mode='border')
+        
+        t1 = torch.pow(2, i1) / base_size
+        t2 = torch.pow(2, i2) / base_size
+        td = t2 - t1
+        td[td == 0] = 1
+        t = torch.pow(2, i) / base_size
+        t = (t - t1) / td
+        return torch.lerp(rgb1, rgb2, t)
