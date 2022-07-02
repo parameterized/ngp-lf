@@ -43,7 +43,7 @@ def gen_video(dataset, model, path, duration=2, fps=12, cuda=True, batch_size=No
         with torch.no_grad():
             rays = get_rays(H, W, focal, pose_t)
             if isinstance(dataset, MultiscaleDataset):
-                rays = torch.cat([rays, torch.zeros_like(rays[:,:1])], dim=-1)
+                rays = torch.cat([rays, torch.ones_like(rays[:,:1]) / 256], dim=-1)
             if cuda:
                 rays = rays.cuda()
             if batch_size is None:
